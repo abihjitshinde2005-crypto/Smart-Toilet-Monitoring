@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Smart Toilet Dashboard</title>
+
+  <!-- Tailwind CDN (for quick prototype) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Supabase JS (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/browser/supabase.js"></script>
+
+  <!-- Chart.js (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* small custom styles */
+    .kpi-updated { transform: scale(1.03); transition: transform 220ms ease; }
+    .live-dot { width:10px; height:10px; border-radius:999px; display:inline-block; margin-right:8px; }
+    .pulse { animation: pulse 1s ease; }
+    @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.06); } 100% { transform: scale(1); } }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
+
+  <div class="min-h-screen p-6">
+    <header class="flex items-center justify-between mb-6">
+      <div class="flex items-center gap-4">
+        <div class="bg-teal-500 text-white rounded-xl px-3 py-2 font-semibold">Smart Toilet</div>
+        <div class="text-sm text-slate-500 dark:text-slate-300">Realtime telemetry dashboard</div>
+      </div>
+
+      <div class="flex items-center gap-4">
+        <div id="liveIndicator" class="flex items-center text-sm text-slate-600 dark:text-slate-300">
+          <span class="live-dot bg-rose-500" id="liveDot"></span><span id="liveText">Offline</span>
+        </div>
+        <button id="toggleTheme" class="px-3 py-2 rounded-lg border text-sm">Toggle Theme</button>
+        <button id="exportCsv" class="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm">Export CSV</button>
+      </div>
+    </header>
+
+    <!-- KPIs -->
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+
+      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
+        <div class="text-sm text-slate-400">Temperature</div>
+        <div class="flex items-baseline gap-4">
+          <div id="kpiTemp" class="text-3xl font-semibold">-- °C</div>
+          <div class="ml-auto text-sm text-slate-500" id="kpiTempTime">--</div>
+        </div>
+        <canvas id="tempSpark" class="mt-3" height="60"></canvas>
+      </div>
+
+      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
+        <div class="text-sm text-slate-400">Pressure</div>
+        <div class="flex items-baseline gap-4">
+          <div id="kpiPress" class="text-3xl font-semibold">-- hPa</div>
+          <div class="ml-auto text-sm text-slate-500" id="kpiPressTime">--</div>
+        </div>
+        <canvas id="pressSpark" class="mt-3" height="60"></canvas>
+      </div>
+
+      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm text-slate-400">VOC</div>
+            <div id="kpiVOC" class="text-3xl font-semibold">--</div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm text-slate-400">Status</div>
+            <div id="kpiStatus" class="px-2 py-1 rounded-md font-medium">--</div>
+          </div>
+        </div>
+        <canvas id="vocSpark" class="mt-3" height="60"></canvas>
+      </div>
+
+    </section>
+
+    <!-- Charts -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+
+      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
+        <div class="flex items-center justify-between mb-2">
+          <div class="font-semibold">Temperature (last N samples)</div>
+          <div class="text-sm text-slate-500">Realtime</div>
+        </div>
+        <canvas id="tempChart" height="160"></canvas>
+      </div>
+
+      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
+        <div class="flex items-center justify-between mb-2">
+          <div class="font-semibold">VOC (last N samples)</div>
+          <div class="text-sm text-slate-500">Realtime</div>
+        </div>
+        <canvas id="vocChart" height="160"></canvas>
+      </div>
+
+      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4 lg:col-span-2">
+        <div class="flex items-center justify-between mb-2">
+          <div class="font-semibold">MQ2 & MQ137</div>
+          <div class="text-sm text-slate-500">Latest distribution</div>
+        </div>
+        <canvas id="mqChart" height="120"></canvas>
+      </div>
+
+    </section>
+
+    <!-- Donut + logs -->
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
+        <div class="font-semibold mb-2">Status Distribution</div>
+        <canvas id="statusDonut" height="200"></canvas>
+      </div>
+
+      <div class="md:col-span-2 bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
+        <div class="flex items-center justify-between mb-2">
+          <div class="font-semibold">Recent Events</div>
+          <div class="text-sm text-slate-500">Live log</div>
+        </div>
+        <div id="events" class="max-h-60 overflow-auto text-sm space-y-2"></div>
+      </div>
+    </section>
+
+    <footer class="mt-6 text-xs text-slate-400">Built with Supabase + Chart.js • Replace SUPABASE_URL & SUPABASE_ANON_KEY in the script</footer>
+  </div>
+
+<script>
+/* ==========================
+   CONFIG — REPLACE THESE
+   ========================== */
+const SUPABASE_URL = "https://zxrghjceuouepfrqefuv.supabase."; // e.g. https://abcd1234.supabase.co
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4cmdoamNldW91ZXBmcnFlZnV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxMDg1MjAsImV4cCI6MjA3NzY4NDUyMH0.wKadbFlhqP_XYCePnSXpwpuH2CIXXwYt6Pd7r0uqJPg";                  // put your anon key here
+const TABLE_NAME = "telemetry"; // your table name
+const MAX_SAMPLES = 120; // how many recent samples to keep in charts
+
+/* ==========================
+   INIT SUPABASE
+   ========================== */
+const supabase = supabaseJs.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ==========================
+   STATE
+   ========================== */
+let cache = []; // array of telemetry objects { recorded_at, temp, pressure, voc, mq2, mq137, status }
+let connected = false;
+
+/* ==========================
+   UTIL: formatting
+   ========================== */
+function fmtTime(ts) {
+  if (!ts) return "--";
+  const d = new Date(ts);
+  return d.toLocaleTimeString();
+}
+
+/* ==========================
+   CHARTS SETUP
+   ========================== */
+const ctxTemp = document.getElementById('tempChart').getContext('2d');
+const ctxVoc = document.getElementById('vocChart').getContext('2d');
+const ctxMQ = document.getElementById('mqChart').getContext('2d');
+const ctxDonut = document.getElementById('statusDonut').getContext('2d');
+
+const tempChart = new Chart(ctxTemp, {
+  type: 'line',
+  data: { labels: [], datasets: [{ label: 'Temp °C', data: [], fill: true, borderColor: '#06b6d4', backgroundColor: (ctx)=>{return 'rgba(6,182,212,0.12)'} , tension: 0.25, pointRadius:0 }]},
+  options: { animation: { duration: 400 }, scales: { x: { display:false } }, plugins:{ legend:{ display:false } } }
+});
+const vocChart = new Chart(ctxVoc, {
+  type: 'line',
+  data: { labels: [], datasets: [{ label: 'VOC', data: [], fill: true, borderColor: '#6366f1', backgroundColor:'rgba(99,102,241,0.10)', tension:0.25, pointRadius:0 }]},
+  options: { animation: { duration: 400 }, scales: { x: { display:false } }, plugins:{ legend:{ display:false } } }
+});
+const mqChart = new Chart(ctxMQ, {
+  type: 'bar',
+  data: { labels: ['MQ2','MQ137'], datasets: [{ label: 'Latest', data: [0,0], backgroundColor: ['#10b981','#f59e0b'] }]},
+  options: { animation: { duration: 400 }, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+});
+const statusDonut = new Chart(ctxDonut, {
+  type: 'doughnut',
+  data: { labels: ['Clean','Moderate','Dirty'], datasets: [{ data: [0,0,0], backgroundColor: ['#10b981','#f59e0b','#ef4444'] }] },
+  options: { plugins:{ legend:{ position:'bottom' } }, animation:{ duration:400 } }
+});
+
+/* small sparklines (tiny charts) */
+const tempSpark = new Chart(document.getElementById('tempSpark').getContext('2d'), {
+  type:'line',
+  data:{labels:[],datasets:[{data:[],pointRadius:0,borderColor:'#06b6d4',tension:0.3}]},
+  options:{scales:{x:{display:false},y:{display:false}},plugins:{legend:{display:false}},elements:{line:{borderWidth:2}}, animation:{duration:200}}
+});
+const pressSpark = new Chart(document.getElementById('pressSpark').getContext('2d'), {
+  type:'line',
+  data:{labels:[],datasets:[{data:[],pointRadius:0,borderColor:'#64748b',tension:0.3}]},
+  options:{scales:{x:{display:false},y:{display:false}},plugins:{legend:{display:false}},elements:{line:{borderWidth:2}}, animation:{duration:200}}
+});
+const vocSpark = new Chart(document.getElementById('vocSpark').getContext('2d'), {
+  type:'line',
+  data:{labels:[],datasets:[{data:[],pointRadius:0,borderColor:'#6366f1',tension:0.3}]},
+  options:{scales:{x:{display:false},y:{display:false}},plugins:{legend:{display:false}},elements:{line:{borderWidth:2}}, animation:{duration:200}}
+});
+
+/* ==========================
+   DOM helpers
+   ========================== */
+const kpiTempEl = document.getElementById('kpiTemp');
+const kpiPressEl = document.getElementById('kpiPress');
+const kpiVocEl = document.getElementById('kpiVOC');
+const kpiStatusEl = document.getElementById('kpiStatus');
+const kpiTempTime = document.getElementById('kpiTempTime');
+const kpiPressTime = document.getElementById('kpiPressTime');
+const eventsEl = document.getElementById('events');
+const liveDot = document.getElementById('liveDot');
+const liveText = document.getElementById('liveText');
+
+/* ==========================
+   DATA HANDLERS
+   ========================== */
+function pushSample(obj) {
+  // normalized object fields expectations: recorded_at, temp, pressure, voc, mq2, mq137, status
+  cache.push(obj);
+  if (cache.length > MAX_SAMPLES) cache.shift();
+}
+
+function updateKPIs() {
+  if (cache.length === 0) return;
+  const latest = cache[cache.length-1];
+  // animate update
+  flash(kpiTempEl); flash(kpiPressEl); flash(kpiVocEl);
+
+  kpiTempEl.textContent = (typeof latest.temp === 'number') ? latest.temp.toFixed(1) + ' °C' : '-- °C';
+  kpiPressEl.textContent = (typeof latest.pressure === 'number') ? latest.pressure.toFixed(1) + ' hPa' : '-- hPa';
+  kpiVocEl.textContent = latest.voc ?? '--';
+  kpiStatusEl.textContent = latest.status ?? '--';
+  // status color
+  if (latest.status === 'Dirty') {
+    kpiStatusEl.className = 'px-2 py-1 rounded-md font-medium bg-red-600 text-white';
+  } else if (latest.status === 'Moderate') {
+    kpiStatusEl.className = 'px-2 py-1 rounded-md font-medium bg-amber-500 text-black';
+  } else {
+    kpiStatusEl.className = 'px-2 py-1 rounded-md font-medium bg-emerald-500 text-white';
+  }
+
+  kpiTempTime.textContent = fmtTime(latest.recorded_at);
+  kpiPressTime.textContent = fmtTime(latest.recorded_at);
+
+  // update sparklines
+  updateSpark(tempSpark, cache.map(s=>s.temp));
+  updateSpark(pressSpark, cache.map(s=>s.pressure));
+  updateSpark(vocSpark, cache.map(s=>s.voc));
+}
+
+function updateSpark(chartObj, dataArr) {
+  chartObj.data.labels = dataArr.map((_,i)=>i);
+  chartObj.data.datasets[0].data = dataArr.map(x => (typeof x === 'number' ? x : null));
+  chartObj.update('none');
+}
+
+function updateCharts() {
+  // temp chart
+  tempChart.data.labels = cache.map(s => (new Date(s.recorded_at)).toLocaleTimeString());
+  tempChart.data.datasets[0].data = cache.map(s => (typeof s.temp === 'number' ? s.temp : null));
+  tempChart.update();
+
+  // voc chart
+  vocChart.data.labels = tempChart.data.labels.slice();
+  vocChart.data.datasets[0].data = cache.map(s => s.voc ?? null);
+  vocChart.update();
+
+  // mq chart uses only latest
+  if (cache.length) {
+    const latest = cache[cache.length-1];
+    mqChart.data.datasets[0].data = [latest.mq2 ?? 0, latest.mq137 ?? 0];
+    mqChart.update();
+  }
+
+  // status donut distribution
+  const counts = { Clean:0, Moderate:0, Dirty:0 };
+  cache.forEach(s => {
+    const st = s.status || 'Clean';
+    counts[st] = (counts[st]||0)+1;
+  });
+  statusDonut.data.datasets[0].data = [counts.Clean, counts.Moderate, counts.Dirty];
+  statusDonut.update();
+}
+
+function addEventLog(obj) {
+  const d = document.createElement('div');
+  d.className = 'p-2 rounded-md bg-slate-50 dark:bg-slate-700';
+  d.innerHTML = `<div class="flex justify-between"><div class="font-medium">${obj.status || '--'}</div><div class="text-xs text-slate-400">${fmtTime(obj.recorded_at)}</div></div>
+                 <div class="text-xs text-slate-500 mt-1">T:${(obj.temp||'--')}°C P:${(obj.pressure||'--')}hPa VOC:${obj.voc||'--'} MQ2:${obj.mq2||'--'} MQ137:${obj.mq137||'--'}</div>`;
+  eventsEl.prepend(d);
+  // limit events
+  while (eventsEl.children.length > 200) eventsEl.removeChild(eventsEl.lastChild);
+}
+
+/* animate flash */
+function flash(el) {
+  if (!el) return;
+  el.classList.add('kpi-updated', 'pulse');
+  setTimeout(()=> el.classList.remove('kpi-updated','pulse'), 500);
+}
+
+/* ==========================
+   SUPABASE DATA LOAD + REALTIME
+   ========================== */
+async function initialLoad() {
+  try {
+    // fetch latest MAX_SAMPLES rows
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select('*')
+      .order('recorded_at', { ascending: false })
+      .limit(MAX_SAMPLES);
+
+    if (error) { console.error('Initial load error', error); return; }
+    // supabase returns newest first; reverse to chronological
+    const rows = (data||[]).slice().reverse().map(normalizeRow);
+    cache = rows;
+    rows.forEach(r => addEventLog(r));
+    updateKPIs(); updateCharts();
+    setLive(true);
+  } catch (e) {
+    console.error('Initial load exception', e);
+  }
+}
+
+function normalizeRow(r) {
+  // ensure types
+  return {
+    recorded_at: r.recorded_at,
+    temp: r.temp !== null && r.temp !== undefined ? parseFloat(r.temp) : null,
+    pressure: r.pressure !== null && r.pressure !== undefined ? parseFloat(r.pressure) : null,
+    voc: r.voc !== null && r.voc !== undefined ? parseInt(r.voc) : null,
+    mq2: r.mq2 !== null && r.mq2 !== undefined ? parseInt(r.mq2) : null,
+    mq137: r.mq137 !== null && r.mq137 !== undefined ? parseInt(r.mq137) : null,
+    status: r.status || 'Clean'
+  };
+}
+
+function setLive(flag) {
+  connected = flag;
+  liveDot.style.backgroundColor = flag ? '#10b981' : '#ef4444';
+  liveText.textContent = flag ? 'Live' : 'Offline';
+}
+
+/* Realtime subscription to inserts */
+function subscribeRealtime() {
+  // supabase-js v2 realtime via channel
+  const channel = supabase
+    .channel('public:telemetry')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLE_NAME }, payload => {
+      const newRow = normalizeRow(payload.new);
+      pushSample(newRow);
+      addEventLog(newRow);
+      updateKPIs(); updateCharts();
+      setLive(true);
+    })
+    .subscribe(status => {
+      console.log('Realtime subscribe status', status);
+      if (status === 'SUBSCRIBED') setLive(true);
+    });
+
+  // fallback: reconnect logic could be added
+}
+
+/* ==========================
+   EXPORT CSV
+   ========================== */
+function exportCSV() {
+  if (!cache.length) return alert('No data to export');
+  const header = ['recorded_at','temp','pressure','voc','mq2','mq137','status'];
+  const rows = cache.map(r => [r.recorded_at, r.temp, r.pressure, r.voc, r.mq2, r.mq137, r.status]);
+  const csv = [header.join(','), ...rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `telemetry_${new Date().toISOString()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ==========================
+   UI interactions
+   ========================== */
+document.getElementById('exportCsv').addEventListener('click', exportCSV);
+document.getElementById('toggleTheme').addEventListener('click', ()=> {
+  document.documentElement.classList.toggle('dark');
+});
+
+/* ==========================
+   BOOTSTRAP: start
+   ========================== */
+(async function boot() {
+  // sanity checks
+  if (!SUPABASE_URL.includes('supabase.co') || SUPABASE_ANON_KEY.length < 20) {
+    console.warn('Please set SUPABASE_URL and SUPABASE_ANON_KEY at top of the script.');
+  }
+
+  await initialLoad();
+  subscribeRealtime();
+
+  // mark live for a few seconds, then if no new rows set offline
+  setInterval(() => {
+    // if last sample older than 60s, mark offline
+    if (cache.length) {
+      const latest = new Date(cache[cache.length-1].recorded_at);
+      const age = (Date.now() - latest.getTime())/1000;
+      if (age > 60) setLive(false);
+    } else {
+      setLive(false);
+    }
+  }, 5000);
+})();
+</script>
+
+</body>
+</html>
