@@ -1,100 +1,116 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Smart Toilet Dashboard</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sensor Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+            text-align: center;
+        }
 
-  <!-- Supabase UMD -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+        h1 {
+            margin: 20px 0;
+            color: #333;
+        }
 
-  <style>
-    body { font-family: Arial, sans-serif; background:#f8fafc; color:#0f172a; margin:0; padding:20px; }
-    .wrap { max-width:600px; margin:auto; }
-    h1 { text-align:center; }
-    .reading { background:white; padding:16px; margin:12px 0; border-radius:10px; box-shadow:0 4px 12px rgba(0,0,0,0.05); }
-    .label { font-size:14px; color:#6b7280; }
-    .value { font-size:22px; font-weight:bold; margin-top:4px; }
-  </style>
+        .sensor-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+            margin: 20px;
+        }
+
+        .sensor-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 20px;
+            width: 150px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        .sensor-card h2 {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        .sensor-card .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007BFF;
+        }
+    </style>
+    <!-- Supabase client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Smart Toilet — Latest Readings</h1>
-
-    <div class="reading">
-      <div class="label">Temperature (°C)</div>
-      <div class="value" id="temp">--</div>
+    <h1>Sensor Dashboard</h1>
+    <div class="sensor-container">
+        <div class="sensor-card" id="temperature">
+            <h2>Temperature</h2>
+            <p class="value">-- °C</p>
+        </div>
+        <div class="sensor-card" id="pressure">
+            <h2>Pressure</h2>
+            <p class="value">-- Pa</p>
+        </div>
+        <div class="sensor-card" id="mq2">
+            <h2>MQ2</h2>
+            <p class="value">--</p>
+        </div>
+        <div class="sensor-card" id="mq137">
+            <h2>MQ137</h2>
+            <p class="value">--</p>
+        </div>
+        <div class="sensor-card" id="voc">
+            <h2>VOC</h2>
+            <p class="value">--</p>
+        </div>
+        <div class="sensor-card" id="sgp40">
+            <h2>SGP40</h2>
+            <p class="value">--</p>
+        </div>
     </div>
 
-    <div class="reading">
-      <div class="label">Pressure (Pa)</div>
-      <div class="value" id="pressure">--</div>
-    </div>
+    <script>
+        // ===== Supabase Configuration =====
+        const SUPABASE_URL = 'https://zxrghjceuouepfrqefuv.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4cmdoamNldW91ZXBmcnFlZnV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxMDg1MjAsImV4cCI6MjA3NzY4NDUyMH0.wKadbFlhqP_XYCePnSXpwpuH2CIXXwYt6Pd7r0uqJPg';
+        const TABLE = 'telemetry';
 
-    <div class="reading">
-      <div class="label">VOC</div>
-      <div class="value" id="voc">--</div>
-    </div>
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    <div class="reading">
-      <div class="label">MQ2</div>
-      <div class="value" id="mq2">--</div>
-    </div>
+        // Function to fetch latest sensor data
+        async function fetchSensorData() {
+            let { data, error } = await supabase
+                .from(TABLE)
+                .select('*')
+                .order('id', { ascending: false })
+                .limit(1);
 
-    <div class="reading">
-      <div class="label">MQ137</div>
-      <div class="value" id="mq137">--</div>
-    </div>
-  </div>
+            if (error) {
+                console.error('Error fetching data:', error);
+                return;
+            }
 
-<script>
-  // ===== Supabase config =====
- 
-/* ====== CONFIG - replace these ====== */
-const SUPABASE_URL = 'https://zxrghjceuouepfrqefuv.supabase.co'; // your project URL
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4cmdoamNldW91ZXBmcnFlZnV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxMDg1MjAsImV4cCI6MjA3NzY4NDUyMH0.wKadbFlhqP_XYCePnSXpwpuH2CIXXwYt6Pd7r0uqJPg';
-/* ==================================== */
+            if (data && data.length > 0) {
+                const latest = data[0];
+                document.querySelector('#temperature .value').textContent = latest.temperature + ' °C';
+                document.querySelector('#pressure .value').textContent = latest.pressure + ' Pa';
+                document.querySelector('#mq2 .value').textContent = latest.mq2;
+                document.querySelector('#mq137 .value').textContent = latest.mq137;
+                document.querySelector('#voc .value').textContent = latest.voc;
+                document.querySelector('#sgp40 .value').textContent = latest.sgp40;
+            }
+        }
 
-  // initialize client
-  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-  // table name
-  const TABLE = 'telemetry';
-
-  // elements
-  const tempEl = document.getElementById('temp');
-  const pressureEl = document.getElementById('pressure');
-  const vocEl = document.getElementById('voc');
-  const mq2El = document.getElementById('mq2');
-  const mq137El = document.getElementById('mq137');
-
-  async function fetchLatestReading() {
-    try {
-      const { data, error } = await supabaseClient
-        .from(TABLE)
-        .select('*')
-        .order('recorded_at', { ascending: false })
-        .limit(1);
-
-      if (error) { console.error(error); return; }
-      if (!data || data.length === 0) return;
-
-      const row = data[0];
-      tempEl.textContent = row.temp ?? '--';
-      pressureEl.textContent = row.pressure ?? '--';
-      vocEl.textContent = row.voc ?? '--';
-      mq2El.textContent = row.mq2 ?? '--';
-      mq137El.textContent = row.mq137 ?? '--';
-    } catch (err) {
-      console.error('Fetch error', err);
-    }
-  }
-
-  // fetch initially
-  fetchLatestReading();
-
-  // refresh every 5s
-  setInterval(fetchLatestReading, 5000);
-</script>
+        // Fetch data every 5 seconds
+        fetchSensorData();
+        setInterval(fetchSensorData, 5000);
+    </script>
 </body>
 </html>
+
