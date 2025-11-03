@@ -3,417 +3,507 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Smart Toilet Dashboard</title>
+  <title>Smart Toilet — Light Dashboard with Alerts</title>
 
-  <!-- Tailwind CDN (for quick prototype) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- Supabase JS (CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/browser/supabase.js"></script>
-
-  <!-- Chart.js (CDN) -->
+  <!-- Chart.js UMD -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Supabase UMD -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
   <style>
-    /* small custom styles */
-    .kpi-updated { transform: scale(1.03); transition: transform 220ms ease; }
-    .live-dot { width:10px; height:10px; border-radius:999px; display:inline-block; margin-right:8px; }
-    .pulse { animation: pulse 1s ease; }
-    @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.06); } 100% { transform: scale(1); } }
+    /* Light modern theme */
+    :root{
+      --bg: #f8fafc; --card: #ffffff; --muted: #6b7280; --accent: #06b6d4;
+      --good:#10b981; --warn:#f59e0b; --bad:#ef4444;
+    }
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial;background:linear-gradient(180deg,#f7fbfc,#f8fafc);color:#0f172a}
+    .wrap{max-width:1200px;margin:22px auto;padding:18px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+    .brand{display:flex;gap:12px;align-items:center}
+    .logo{background:linear-gradient(135deg,var(--accent),#7c3aed);width:48px;height:48px;border-radius:12px;color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px}
+    h1{margin:0;font-size:20px}
+    .subtitle{font-size:13px;color:var(--muted)}
+    .controls{display:flex;gap:10px;align-items:center}
+    button,select,input{background:var(--card);border:1px solid #e6eef5;padding:8px 10px;border-radius:10px;font-size:13px}
+    button:hover{box-shadow:0 6px 18px rgba(15,23,42,0.06)}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
+    .card{background:var(--card);border-radius:12px;padding:14px;box-shadow:0 6px 20px rgba(15,23,42,0.05);min-height:88px}
+    .muted{color:var(--muted);font-size:12px}
+    .kpi{font-size:20px;font-weight:700}
+    .charts{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:12px}
+    .charts .card{min-height:240px}
+    .tabbar{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+    .tab{padding:8px 12px;border-radius:10px;cursor:pointer;border:1px solid transparent}
+    .tab.active{background:linear-gradient(90deg,rgba(6,182,212,0.08),rgba(124,58,237,0.06));border-color:#e6eef5}
+    .alert-banner{background:#fff1f0;color:#7f1d1d;border:1px solid #fecaca;padding:10px;border-radius:10px;margin:12px 0}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{padding:8px;border-bottom:1px solid #f1f5f9;text-align:left}
+    .small{font-size:12px;color:var(--muted)}
+    .status-badge{padding:6px 8px;border-radius:10px;font-weight:600;font-size:12px}
+    .good{background:#dcfce7;color:#064e3b} .warn{background:#fff7ed;color:#78350f} .bad{background:#fff1f2;color:#7f1d1d}
+    .alerts-list{max-height:220px;overflow:auto}
+    .alert-item{padding:10px;border-radius:8px;border:1px solid rgba(2,6,23,0.04);margin-bottom:8px;background:linear-gradient(180deg,#fff,#fbfbfd)}
+    @media (max-width:980px){ .grid{grid-template-columns:1fr} .charts{grid-template-columns:1fr} }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
-
-  <div class="min-h-screen p-6">
-    <header class="flex items-center justify-between mb-6">
-      <div class="flex items-center gap-4">
-        <div class="bg-teal-500 text-white rounded-xl px-3 py-2 font-semibold">Smart Toilet</div>
-        <div class="text-sm text-slate-500 dark:text-slate-300">Realtime telemetry dashboard</div>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo">ST</div>
+        <div>
+          <h1>Smart Toilet — Dashboard with Alerts</h1>
+          <div class="subtitle">Realtime telemetry, thresholds & alert visualization</div>
+        </div>
       </div>
 
-      <div class="flex items-center gap-4">
-        <div id="liveIndicator" class="flex items-center text-sm text-slate-600 dark:text-slate-300">
-          <span class="live-dot bg-rose-500" id="liveDot"></span><span id="liveText">Offline</span>
+      <div class="controls">
+        <div class="small">Device
+          <select id="deviceSelect"><option value="">All</option></select>
         </div>
-        <button id="toggleTheme" class="px-3 py-2 rounded-lg border text-sm">Toggle Theme</button>
-        <button id="exportCsv" class="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm">Export CSV</button>
+        <button id="exportAll">Export CSV</button>
+        <button id="toggleTheme">Toggle Theme</button>
       </div>
     </header>
 
-    <!-- KPIs -->
-    <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <!-- Banner shown when any active alert -->
+    <div id="alertBanner" style="display:none" class="alert-banner">
+      <strong id="alertCount">0</strong> active alert(s) — check the Alerts panel below.
+    </div>
 
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
-        <div class="text-sm text-slate-400">Temperature</div>
-        <div class="flex items-baseline gap-4">
-          <div id="kpiTemp" class="text-3xl font-semibold">-- °C</div>
-          <div class="ml-auto text-sm text-slate-500" id="kpiTempTime">--</div>
-        </div>
-        <canvas id="tempSpark" class="mt-3" height="60"></canvas>
+    <div class="tabbar" id="tabbar">
+      <div class="tab active" data-sensor="temp">Temperature</div>
+      <div class="tab" data-sensor="pressure">Pressure</div>
+      <div class="tab" data-sensor="voc">VOC</div>
+      <div class="tab" data-sensor="mq2">MQ2</div>
+      <div class="tab" data-sensor="mq137">MQ137</div>
+    </div>
+
+    <section class="grid" id="kpiGrid">
+      <div class="card">
+        <div class="muted">Current</div>
+        <div class="kpi" id="currentValue">--</div>
+        <div class="small" id="currentTime">--</div>
       </div>
-
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
-        <div class="text-sm text-slate-400">Pressure</div>
-        <div class="flex items-baseline gap-4">
-          <div id="kpiPress" class="text-3xl font-semibold">-- hPa</div>
-          <div class="ml-auto text-sm text-slate-500" id="kpiPressTime">--</div>
-        </div>
-        <canvas id="pressSpark" class="mt-3" height="60"></canvas>
+      <div class="card">
+        <div class="muted">Min</div>
+        <div class="kpi" id="minValue">--</div>
+        <div class="small">Over visible samples</div>
       </div>
+      <div class="card">
+        <div class="muted">Max / Avg</div>
+        <div class="kpi" id="maxAvg">--</div>
+        <div class="small">Over visible samples</div>
+      </div>
+    </section>
 
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
-        <div class="flex items-center justify-between">
+    <section class="charts">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
           <div>
-            <div class="text-sm text-slate-400">VOC</div>
-            <div id="kpiVOC" class="text-3xl font-semibold">--</div>
+            <div class="muted">Sensor timeline</div>
+            <div style="font-weight:700" id="chartTitle">TEMP</div>
           </div>
-          <div class="text-right">
-            <div class="text-sm text-slate-400">Status</div>
-            <div id="kpiStatus" class="px-2 py-1 rounded-md font-medium">--</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <label class="small">Samples</label>
+            <select id="sampleCount"><option value="50">50</option><option value="100" selected>100</option><option value="300">300</option></select>
+            <button id="exportSensor">Export Sensor</button>
           </div>
         </div>
-        <canvas id="vocSpark" class="mt-3" height="60"></canvas>
+        <canvas id="sensorChart" style="width:100%;height:260px;margin-top:12px"></canvas>
       </div>
 
-    </section>
+      <div class="card">
+        <div class="muted">Status Distribution</div>
+        <canvas id="statusDonut" style="width:100%;height:200px;margin-top:10px"></canvas>
 
-    <!-- Charts -->
-    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
-        <div class="flex items-center justify-between mb-2">
-          <div class="font-semibold">Temperature (last N samples)</div>
-          <div class="text-sm text-slate-500">Realtime</div>
+        <div style="margin-top:10px" class="muted">Threshold</div>
+        <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
+          <input id="thresholdInput" type="number" placeholder="upper threshold" style="width:120px"/>
+          <button id="setThreshold">Set</button>
         </div>
-        <canvas id="tempChart" height="160"></canvas>
-      </div>
 
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
-        <div class="flex items-center justify-between mb-2">
-          <div class="font-semibold">VOC (last N samples)</div>
-          <div class="text-sm text-slate-500">Realtime</div>
-        </div>
-        <canvas id="vocChart" height="160"></canvas>
-      </div>
-
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4 lg:col-span-2">
-        <div class="flex items-center justify-between mb-2">
-          <div class="font-semibold">MQ2 & MQ137</div>
-          <div class="text-sm text-slate-500">Latest distribution</div>
-        </div>
-        <canvas id="mqChart" height="120"></canvas>
-      </div>
-
-    </section>
-
-    <!-- Donut + logs -->
-    <section class="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <div class="bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
-        <div class="font-semibold mb-2">Status Distribution</div>
-        <canvas id="statusDonut" height="200"></canvas>
-      </div>
-
-      <div class="md:col-span-2 bg-white dark:bg-slate-800 rounded-2xl shadow p-4">
-        <div class="flex items-center justify-between mb-2">
-          <div class="font-semibold">Recent Events</div>
-          <div class="text-sm text-slate-500">Live log</div>
-        </div>
-        <div id="events" class="max-h-60 overflow-auto text-sm space-y-2"></div>
+        <div style="margin-top:12px" class="muted">Latest MQ readings</div>
+        <canvas id="mqChart" style="width:100%;height:140px;margin-top:8px"></canvas>
       </div>
     </section>
 
-    <footer class="mt-6 text-xs text-slate-400">Built with Supabase + Chart.js • Replace SUPABASE_URL & SUPABASE_ANON_KEY in the script</footer>
+    <div style="display:grid;grid-template-columns:1fr 360px;gap:12px;margin-top:12px">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="muted">Recent events (live)</div>
+          <div class="small">Realtime: <strong id="liveText">—</strong></div>
+        </div>
+        <div id="events" style="max-height:280px;overflow:auto;margin-top:10px"></div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="muted">Alerts</div>
+          <div class="small">Active / History</div>
+        </div>
+
+        <div style="margin-top:10px">
+          <div class="muted">Active Alerts</div>
+          <div id="activeAlerts" class="alerts-list" style="margin-top:8px"></div>
+
+          <div style="margin-top:10px" class="muted">Alert History</div>
+          <div id="alertHistory" class="alerts-list" style="margin-top:8px"></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px" class="small">Tip: Replace SUPABASE_URL & SUPABASE_ANON_KEY in the script below</div>
   </div>
 
 <script>
-/* ==========================
-   CONFIG — REPLACE THESE
-   ========================== */
-const SUPABASE_URL = "https://zxrghjceuouepfrqefuv.supabase."; // e.g. https://abcd1234.supabase.co
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4cmdoamNldW91ZXBmcnFlZnV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxMDg1MjAsImV4cCI6MjA3NzY4NDUyMH0.wKadbFlhqP_XYCePnSXpwpuH2CIXXwYt6Pd7r0uqJPg";                  // put your anon key here
-const TABLE_NAME = "telemetry"; // your table name
-const MAX_SAMPLES = 120; // how many recent samples to keep in charts
+/* ============================
+   CONFIG – fill these values
+   ============================ */
 
-/* ==========================
-   INIT SUPABASE
-   ========================== */
-const supabase = supabaseJs.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+/* ====== CONFIG - replace these ====== */
+const SUPABASE_URL = 'https://zxrghjceuouepfrqefuv.supabase.co'; // your project URL
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4cmdoamNldW91ZXBmcnFlZnV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxMDg1MjAsImV4cCI6MjA3NzY4NDUyMH0.wKadbFlhqP_XYCePnSXpwpuH2CIXXwYt6Pd7r0uqJPg';
+/* ==================================== */
 
-/* ==========================
-   STATE
-   ========================== */
-let cache = []; // array of telemetry objects { recorded_at, temp, pressure, voc, mq2, mq137, status }
-let connected = false;
+const TABLE = "telemetry";
+/* ============================ */
 
-/* ==========================
-   UTIL: formatting
-   ========================== */
-function fmtTime(ts) {
-  if (!ts) return "--";
-  const d = new Date(ts);
-  return d.toLocaleTimeString();
-}
-
-/* ==========================
-   CHARTS SETUP
-   ========================== */
-const ctxTemp = document.getElementById('tempChart').getContext('2d');
-const ctxVoc = document.getElementById('vocChart').getContext('2d');
-const ctxMQ = document.getElementById('mqChart').getContext('2d');
-const ctxDonut = document.getElementById('statusDonut').getContext('2d');
-
-const tempChart = new Chart(ctxTemp, {
-  type: 'line',
-  data: { labels: [], datasets: [{ label: 'Temp °C', data: [], fill: true, borderColor: '#06b6d4', backgroundColor: (ctx)=>{return 'rgba(6,182,212,0.12)'} , tension: 0.25, pointRadius:0 }]},
-  options: { animation: { duration: 400 }, scales: { x: { display:false } }, plugins:{ legend:{ display:false } } }
-});
-const vocChart = new Chart(ctxVoc, {
-  type: 'line',
-  data: { labels: [], datasets: [{ label: 'VOC', data: [], fill: true, borderColor: '#6366f1', backgroundColor:'rgba(99,102,241,0.10)', tension:0.25, pointRadius:0 }]},
-  options: { animation: { duration: 400 }, scales: { x: { display:false } }, plugins:{ legend:{ display:false } } }
-});
-const mqChart = new Chart(ctxMQ, {
-  type: 'bar',
-  data: { labels: ['MQ2','MQ137'], datasets: [{ label: 'Latest', data: [0,0], backgroundColor: ['#10b981','#f59e0b'] }]},
-  options: { animation: { duration: 400 }, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
-});
-const statusDonut = new Chart(ctxDonut, {
-  type: 'doughnut',
-  data: { labels: ['Clean','Moderate','Dirty'], datasets: [{ data: [0,0,0], backgroundColor: ['#10b981','#f59e0b','#ef4444'] }] },
-  options: { plugins:{ legend:{ position:'bottom' } }, animation:{ duration:400 } }
-});
-
-/* small sparklines (tiny charts) */
-const tempSpark = new Chart(document.getElementById('tempSpark').getContext('2d'), {
-  type:'line',
-  data:{labels:[],datasets:[{data:[],pointRadius:0,borderColor:'#06b6d4',tension:0.3}]},
-  options:{scales:{x:{display:false},y:{display:false}},plugins:{legend:{display:false}},elements:{line:{borderWidth:2}}, animation:{duration:200}}
-});
-const pressSpark = new Chart(document.getElementById('pressSpark').getContext('2d'), {
-  type:'line',
-  data:{labels:[],datasets:[{data:[],pointRadius:0,borderColor:'#64748b',tension:0.3}]},
-  options:{scales:{x:{display:false},y:{display:false}},plugins:{legend:{display:false}},elements:{line:{borderWidth:2}}, animation:{duration:200}}
-});
-const vocSpark = new Chart(document.getElementById('vocSpark').getContext('2d'), {
-  type:'line',
-  data:{labels:[],datasets:[{data:[],pointRadius:0,borderColor:'#6366f1',tension:0.3}]},
-  options:{scales:{x:{display:false},y:{display:false}},plugins:{legend:{display:false}},elements:{line:{borderWidth:2}}, animation:{duration:200}}
-});
-
-/* ==========================
-   DOM helpers
-   ========================== */
-const kpiTempEl = document.getElementById('kpiTemp');
-const kpiPressEl = document.getElementById('kpiPress');
-const kpiVocEl = document.getElementById('kpiVOC');
-const kpiStatusEl = document.getElementById('kpiStatus');
-const kpiTempTime = document.getElementById('kpiTempTime');
-const kpiPressTime = document.getElementById('kpiPressTime');
+const sampleCountSelect = document.getElementById('sampleCount');
+const deviceSelect = document.getElementById('deviceSelect');
+const tabbar = document.getElementById('tabbar');
+const currentValueEl = document.getElementById('currentValue');
+const currentTimeEl = document.getElementById('currentTime');
+const minValueEl = document.getElementById('minValue');
+const maxAvgEl = document.getElementById('maxAvg');
+const sensorChartEl = document.getElementById('sensorChart').getContext('2d');
+const donutEl = document.getElementById('statusDonut').getContext('2d');
+const mqEl = document.getElementById('mqChart').getContext('2d');
 const eventsEl = document.getElementById('events');
-const liveDot = document.getElementById('liveDot');
 const liveText = document.getElementById('liveText');
+const chartTitle = document.getElementById('chartTitle');
+const thresholdInput = document.getElementById('thresholdInput');
+const exportSensorBtn = document.getElementById('exportSensor');
+const exportAllBtn = document.getElementById('exportAll');
+const toggleThemeBtn = document.getElementById('toggleTheme');
+const setThresholdBtn = document.getElementById('setThreshold');
+const alertBanner = document.getElementById('alertBanner');
+const alertCountEl = document.getElementById('alertCount');
+const activeAlertsEl = document.getElementById('activeAlerts');
+const alertHistoryEl = document.getElementById('alertHistory');
 
-/* ==========================
-   DATA HANDLERS
-   ========================== */
-function pushSample(obj) {
-  // normalized object fields expectations: recorded_at, temp, pressure, voc, mq2, mq137, status
-  cache.push(obj);
-  if (cache.length > MAX_SAMPLES) cache.shift();
-}
+let supabase = null;
+let cache = []; // chronological
+let currentSensor = 'temp';
+let pollTimer = null;
+let thresholds = { temp: 50, pressure: 1200, voc: 40000, mq2: 2000, mq137: 500 };
 
-function updateKPIs() {
-  if (cache.length === 0) return;
-  const latest = cache[cache.length-1];
-  // animate update
-  flash(kpiTempEl); flash(kpiPressEl); flash(kpiVocEl);
+/* Alerts data structures */
+const activeAlerts = {}; // key -> alert object
+const alertHistory = []; // chronological (newest last)
 
-  kpiTempEl.textContent = (typeof latest.temp === 'number') ? latest.temp.toFixed(1) + ' °C' : '-- °C';
-  kpiPressEl.textContent = (typeof latest.pressure === 'number') ? latest.pressure.toFixed(1) + ' hPa' : '-- hPa';
-  kpiVocEl.textContent = latest.voc ?? '--';
-  kpiStatusEl.textContent = latest.status ?? '--';
-  // status color
-  if (latest.status === 'Dirty') {
-    kpiStatusEl.className = 'px-2 py-1 rounded-md font-medium bg-red-600 text-white';
-  } else if (latest.status === 'Moderate') {
-    kpiStatusEl.className = 'px-2 py-1 rounded-md font-medium bg-amber-500 text-black';
-  } else {
-    kpiStatusEl.className = 'px-2 py-1 rounded-md font-medium bg-emerald-500 text-white';
-  }
+/* Charts */
+const sensorChart = new Chart(sensorChartEl, {
+  type: 'line',
+  data: { labels: [], datasets: [{ label: 'value', data: [], borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.08)', fill:true, pointRadius:0, tension:0.25 }]},
+  options: { plugins:{legend:{display:false}}, scales:{x:{display:true}} }
+});
+const donutChart = new Chart(donutEl, { type:'doughnut', data:{labels:['Clean','Moderate','Dirty'], datasets:[{data:[0,0,0],backgroundColor:['#10b981','#f59e0b','#ef4444']}]}, options:{plugins:{legend:{position:'bottom'}}} });
+const mqChart = new Chart(mqEl, { type:'bar', data:{ labels:['MQ2','MQ137'], datasets:[{data:[0,0], backgroundColor:['#10b981','#f59e0b']}]}, options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}} });
 
-  kpiTempTime.textContent = fmtTime(latest.recorded_at);
-  kpiPressTime.textContent = fmtTime(latest.recorded_at);
-
-  // update sparklines
-  updateSpark(tempSpark, cache.map(s=>s.temp));
-  updateSpark(pressSpark, cache.map(s=>s.pressure));
-  updateSpark(vocSpark, cache.map(s=>s.voc));
-}
-
-function updateSpark(chartObj, dataArr) {
-  chartObj.data.labels = dataArr.map((_,i)=>i);
-  chartObj.data.datasets[0].data = dataArr.map(x => (typeof x === 'number' ? x : null));
-  chartObj.update('none');
-}
-
-function updateCharts() {
-  // temp chart
-  tempChart.data.labels = cache.map(s => (new Date(s.recorded_at)).toLocaleTimeString());
-  tempChart.data.datasets[0].data = cache.map(s => (typeof s.temp === 'number' ? s.temp : null));
-  tempChart.update();
-
-  // voc chart
-  vocChart.data.labels = tempChart.data.labels.slice();
-  vocChart.data.datasets[0].data = cache.map(s => s.voc ?? null);
-  vocChart.update();
-
-  // mq chart uses only latest
-  if (cache.length) {
-    const latest = cache[cache.length-1];
-    mqChart.data.datasets[0].data = [latest.mq2 ?? 0, latest.mq137 ?? 0];
-    mqChart.update();
-  }
-
-  // status donut distribution
-  const counts = { Clean:0, Moderate:0, Dirty:0 };
-  cache.forEach(s => {
-    const st = s.status || 'Clean';
-    counts[st] = (counts[st]||0)+1;
-  });
-  statusDonut.data.datasets[0].data = [counts.Clean, counts.Moderate, counts.Dirty];
-  statusDonut.update();
-}
-
-function addEventLog(obj) {
-  const d = document.createElement('div');
-  d.className = 'p-2 rounded-md bg-slate-50 dark:bg-slate-700';
-  d.innerHTML = `<div class="flex justify-between"><div class="font-medium">${obj.status || '--'}</div><div class="text-xs text-slate-400">${fmtTime(obj.recorded_at)}</div></div>
-                 <div class="text-xs text-slate-500 mt-1">T:${(obj.temp||'--')}°C P:${(obj.pressure||'--')}hPa VOC:${obj.voc||'--'} MQ2:${obj.mq2||'--'} MQ137:${obj.mq137||'--'}</div>`;
-  eventsEl.prepend(d);
-  // limit events
-  while (eventsEl.children.length > 200) eventsEl.removeChild(eventsEl.lastChild);
-}
-
-/* animate flash */
-function flash(el) {
-  if (!el) return;
-  el.classList.add('kpi-updated', 'pulse');
-  setTimeout(()=> el.classList.remove('kpi-updated','pulse'), 500);
-}
-
-/* ==========================
-   SUPABASE DATA LOAD + REALTIME
-   ========================== */
-async function initialLoad() {
-  try {
-    // fetch latest MAX_SAMPLES rows
-    const { data, error } = await supabase
-      .from(TABLE_NAME)
-      .select('*')
-      .order('recorded_at', { ascending: false })
-      .limit(MAX_SAMPLES);
-
-    if (error) { console.error('Initial load error', error); return; }
-    // supabase returns newest first; reverse to chronological
-    const rows = (data||[]).slice().reverse().map(normalizeRow);
-    cache = rows;
-    rows.forEach(r => addEventLog(r));
-    updateKPIs(); updateCharts();
-    setLive(true);
-  } catch (e) {
-    console.error('Initial load exception', e);
-  }
-}
-
-function normalizeRow(r) {
-  // ensure types
+/* Utilities */
+function normalizeRow(r){
   return {
     recorded_at: r.recorded_at,
-    temp: r.temp !== null && r.temp !== undefined ? parseFloat(r.temp) : null,
-    pressure: r.pressure !== null && r.pressure !== undefined ? parseFloat(r.pressure) : null,
-    voc: r.voc !== null && r.voc !== undefined ? parseInt(r.voc) : null,
-    mq2: r.mq2 !== null && r.mq2 !== undefined ? parseInt(r.mq2) : null,
-    mq137: r.mq137 !== null && r.mq137 !== undefined ? parseInt(r.mq137) : null,
+    device_id: r.device_id || '',
+    temp: r.temp !== null && r.temp !== undefined ? Number(r.temp) : null,
+    pressure: r.pressure !== null && r.pressure !== undefined ? Number(r.pressure) : null,
+    voc: r.voc !== null && r.voc !== undefined ? Number(r.voc) : null,
+    mq2: r.mq2 !== null && r.mq2 !== undefined ? Number(r.mq2) : null,
+    mq137: r.mq137 !== null && r.q137 !== undefined ? Number(r.mq137) : (r.mq137 !== undefined ? Number(r.mq137) : null),
     status: r.status || 'Clean'
   };
 }
 
-function setLive(flag) {
-  connected = flag;
-  liveDot.style.backgroundColor = flag ? '#10b981' : '#ef4444';
-  liveText.textContent = flag ? 'Live' : 'Offline';
+function pushSample(r){
+  cache.push(r);
+  const max = Number(sampleCountSelect.value) || 100;
+  if (cache.length > max) cache.shift();
 }
 
-/* Realtime subscription to inserts */
-function subscribeRealtime() {
-  // supabase-js v2 realtime via channel
-  const channel = supabase
-    .channel('public:telemetry')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLE_NAME }, payload => {
-      const newRow = normalizeRow(payload.new);
-      pushSample(newRow);
-      addEventLog(newRow);
-      updateKPIs(); updateCharts();
-      setLive(true);
-    })
-    .subscribe(status => {
-      console.log('Realtime subscribe status', status);
-      if (status === 'SUBSCRIBED') setLive(true);
-    });
+/* Alerts: create key per sensor+device */
+function alertKey(sensor, device){ return `${sensor}::${device||'all'}`; }
 
-  // fallback: reconnect logic could be added
+/* Create a new alert */
+function createAlert(sensor, device, value, row){
+  const key = alertKey(sensor, device);
+  if (activeAlerts[key]) return; // already active
+
+  const now = new Date().toISOString();
+  const alert = {
+    id: Math.random().toString(36).slice(2,9),
+    sensor, device, value, first_seen: now, last_seen: now,
+    acknowledged: false, resolved: false,
+    row // keep a reference to the triggering row for context
+  };
+  activeAlerts[key] = alert;
+  alertHistory.push(Object.assign({}, alert)); // push to history as well (copy)
+  renderAlerts();
+  showBanner();
 }
 
-/* ==========================
-   EXPORT CSV
-   ========================== */
-function exportCSV() {
-  if (!cache.length) return alert('No data to export');
-  const header = ['recorded_at','temp','pressure','voc','mq2','mq137','status'];
-  const rows = cache.map(r => [r.recorded_at, r.temp, r.pressure, r.voc, r.mq2, r.mq137, r.status]);
-  const csv = [header.join(','), ...rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(','))].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `telemetry_${new Date().toISOString()}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+/* Resolve alert when value falls below threshold */
+function resolveAlert(sensor, device, value){
+  const key = alertKey(sensor, device);
+  const a = activeAlerts[key];
+  if (!a) return;
+  a.resolved = true;
+  a.resolved_at = new Date().toISOString();
+  a.last_seen = new Date().toISOString();
+  // move to history (already in history), remove from active
+  delete activeAlerts[key];
+  renderAlerts();
+  if (Object.keys(activeAlerts).length === 0) hideBanner();
 }
 
-/* ==========================
-   UI interactions
-   ========================== */
-document.getElementById('exportCsv').addEventListener('click', exportCSV);
-document.getElementById('toggleTheme').addEventListener('click', ()=> {
-  document.documentElement.classList.toggle('dark');
-});
+/* Acknowledge alert (user action) */
+function acknowledgeAlert(key){
+  const a = activeAlerts[key];
+  if (!a) return;
+  a.acknowledged = true;
+  // also move to history and remove from active list
+  a.acknowledged_at = new Date().toISOString();
+  alertHistory.push(Object.assign({}, a));
+  delete activeAlerts[key];
+  renderAlerts();
+  if (Object.keys(activeAlerts).length === 0) hideBanner();
+}
 
-/* ==========================
-   BOOTSTRAP: start
-   ========================== */
-(async function boot() {
-  // sanity checks
-  if (!SUPABASE_URL.includes('supabase.co') || SUPABASE_ANON_KEY.length < 20) {
-    console.warn('Please set SUPABASE_URL and SUPABASE_ANON_KEY at top of the script.');
-  }
+/* Render active alerts and history */
+function renderAlerts(){
+  // active
+  activeAlertsEl.innerHTML = '';
+  const keys = Object.keys(activeAlerts);
+  alertCountEl.textContent = keys.length;
+  keys.forEach(k => {
+    const a = activeAlerts[k];
+    const div = document.createElement('div');
+    div.className = 'alert-item';
+    div.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+        <div><strong>${a.sensor.toUpperCase()}</strong> — ${a.device||'all'}</div>
+        <div style="font-size:12px;color:${a.value > thresholds[a.sensor] ? '#7f1d1d' : '#6b7280'}">${a.value}</div>
+      </div>
+      <div class="small" style="margin-top:6px">First: ${new Date(a.first_seen).toLocaleString()}</div>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button onclick="ack('${k}')">Acknowledge</button>
+      </div>`;
+    activeAlertsEl.appendChild(div);
+  });
 
-  await initialLoad();
-  subscribeRealtime();
+  // history: show last 30
+  alertHistoryEl.innerHTML = '';
+  const hist = alertHistory.slice(-30).reverse();
+  hist.forEach(h => {
+    const div = document.createElement('div');
+    div.className = 'alert-item';
+    div.style.opacity = '0.95';
+    div.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+        <div><strong>${h.sensor.toUpperCase()}</strong> — ${h.device||'all'}</div>
+        <div class="small">${h.acknowledged ? 'Acknowledged' : (h.resolved ? 'Resolved' : 'Active')}</div>
+      </div>
+      <div class="small" style="margin-top:6px">Value: ${h.value} • First: ${new Date(h.first_seen).toLocaleString()} ${h.resolved_at? ' • Resolved: ' + new Date(h.resolved_at).toLocaleString():''}</div>`;
+    alertHistoryEl.appendChild(div);
+  });
+}
 
-  // mark live for a few seconds, then if no new rows set offline
-  setInterval(() => {
-    // if last sample older than 60s, mark offline
-    if (cache.length) {
-      const latest = new Date(cache[cache.length-1].recorded_at);
-      const age = (Date.now() - latest.getTime())/1000;
-      if (age > 60) setLive(false);
-    } else {
-      setLive(false);
+/* Banner show/hide */
+function showBanner(){ alertBanner.style.display = 'block'; }
+function hideBanner(){ alertBanner.style.display = 'none'; }
+
+/* Check thresholds for a row, create/resolve alerts accordingly */
+function checkAlertsForRow(row){
+  const device = row.device_id || '';
+  const sensors = ['temp','pressure','voc','mq2','mq137'];
+  sensors.forEach(sensor => {
+    const val = row[sensor];
+    const th = thresholds[sensor];
+    if (typeof val === 'number' && th !== undefined && !Number.isNaN(th)) {
+      if (val > th) {
+        // create or update last_seen
+        const k = alertKey(sensor, device);
+        if (!activeAlerts[k]) createAlert(sensor, device, val, row);
+        else activeAlerts[k].last_seen = new Date().toISOString();
+      } else {
+        // value below threshold -> resolve any active alert
+        const k = alertKey(sensor, device);
+        if (activeAlerts[k]) resolveAlert(sensor, device, val);
+      }
     }
-  }, 5000);
+  });
+}
+
+/* UI helpers for events, KPIs and charts (similar to previous file) */
+function addEventRow(row){
+  const d = document.createElement('div');
+  d.style.padding='8px'; d.style.borderBottom='1px solid #f1f5f9';
+  d.innerHTML = `<div style="font-weight:700">${row.status}</div><div class="small">${new Date(row.recorded_at).toLocaleString()}</div><div class="small">T:${row.temp ?? '-'} P:${row.pressure ?? '-'} VOC:${row.voc ?? '-'} MQ2:${row.mq2 ?? '-'} MQ137:${row.mq137 ?? '-'}</div>`;
+  eventsEl.prepend(d);
+  while (eventsEl.children.length > 200) eventsEl.removeChild(eventsEl.lastChild);
+}
+
+function computeStats(values){
+  const nums = values.filter(v => typeof v === 'number');
+  if (!nums.length) return {min:null,max:null,avg:null};
+  const min = Math.min(...nums), max = Math.max(...nums), avg = nums.reduce((a,b)=>a+b,0)/nums.length;
+  return {min,max,avg};
+}
+
+/* Update UI and charts based on in-memory cache (chronological) */
+function updateUIandCharts(){
+  if (!cache.length){ currentValueEl.textContent='—'; currentTimeEl.textContent='—'; minValueEl.textContent='—'; maxAvgEl.textContent='—'; return; }
+  const latest = cache[cache.length-1];
+  const val = latest[currentSensor];
+  currentValueEl.textContent = (val !== null && val !== undefined) ? String(val) : '—';
+  currentTimeEl.textContent = new Date(latest.recorded_at).toLocaleString();
+
+  const arr = cache.map(r => r[currentSensor]).filter(x => typeof x === 'number');
+  if (arr.length){
+    const stats = computeStats(arr);
+    minValueEl.textContent = stats.min;
+    maxAvgEl.textContent = `${stats.max} / ${stats.avg.toFixed(2)}`;
+  } else { minValueEl.textContent='—'; maxAvgEl.textContent='—'; }
+
+  // donut
+  const counts = { Clean:0, Moderate:0, Dirty:0 };
+  cache.forEach(r => counts[r.status] = (counts[r.status]||0)+1);
+  donutChart.data.datasets[0].data = [counts.Clean, counts.Moderate, counts.Dirty];
+  donutChart.update();
+
+  // mqChart latest
+  const last = cache[cache.length-1];
+  mqChart.data.datasets[0].data = [last.mq2 || 0, last.mq137 || 0];
+  mqChart.update();
+
+  // update sensor chart
+  const labels = cache.map(r => new Date(r.recorded_at).toLocaleTimeString());
+  const data = cache.map(r => r[currentSensor]);
+  sensorChart.data.labels = labels;
+  sensorChart.data.datasets[0].data = data;
+  sensorChart.update();
+}
+
+/* REST load */
+async function fetchLatest(limit=100, device=''){
+  try{
+    let q = supabase.from(TABLE).select('*').order('recorded_at',{ascending:false}).limit(limit);
+    if (device) q = q.eq('device_id', device);
+    const { data, error } = await q;
+    if (error){ console.error('REST error', error); return []; }
+    return (data||[]).slice().reverse().map(normalizeRow);
+  }catch(e){ console.error('fetchLatest exception', e); return []; }
+}
+
+/* load devices for selector */
+async function loadDevices(){
+  try{
+    const { data, error } = await supabase.from(TABLE).select('device_id').neq('device_id', null).limit(1000);
+    if (error) { console.warn('device load error', error); return; }
+    const ids = Array.from(new Set((data||[]).map(x=>x.device_id).filter(Boolean)));
+    deviceSelect.innerHTML = '<option value="">All</option>' + ids.map(id => `<option value="${id}">${id}</option>`).join('');
+  }catch(e){ console.error('loadDevices', e); }
+}
+
+/* Full load & check alerts */
+async function loadAndRender(){
+  const limit = Number(sampleCountSelect.value) || 100;
+  const device = deviceSelect.value || '';
+  const rows = await fetchLatest(limit, device);
+  cache = rows;
+  // check alerts for each row
+  rows.forEach(r => checkAlertsForRow(r));
+  updateUIandCharts();
+  liveText.textContent = cache.length ? 'yes' : 'no';
+  // render alerts UI
+  renderAlerts();
+}
+
+/* Realtime subscription */
+function subscribeRealtime(){
+  try{
+    const ch = supabase
+      .channel('public:' + TABLE)
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:TABLE }, payload => {
+        const r = normalizeRow(payload.new);
+        // device filter
+        if (deviceSelect.value && r.device_id !== deviceSelect.value) return;
+        pushSample(r);
+        addEventRow(r);
+        checkAlertsForRow(r);
+        updateUIandCharts();
+        liveText.textContent = 'yes';
+      });
+
+    ch.subscribe(status => {
+      console.log('realtime status', status);
+      if (status === 'SUBSCRIBED') { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+      else { if (!pollTimer) pollTimer = setInterval(loadAndRender, 5000); }
+    }).onError(err => { console.error('realtime error', err); if (!pollTimer) pollTimer = setInterval(loadAndRender, 5000); });
+  }catch(e){ console.error('subscribeRealtime', e); if (!pollTimer) pollTimer = setInterval(loadAndRender, 5000); }
+}
+
+/* Export CSVs (sensor and all) */
+function exportSensorCSV(){
+  if (!cache.length){ alert('No data'); return; }
+  const header = ['recorded_at','device_id',currentSensor];
+  const rows = cache.map(r => [r.recorded_at, r.device_id || '', r[currentSensor]]);
+  const csv = [header.join(','), ...rows.map(row => row.map(c => `"${String(c).replace(/"/g,'""')}"`).join(','))].join('\n');
+  const blob = new Blob([csv], { type:'text/csv' }); const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=u; a.download=`${currentSensor}_data.csv`; a.click(); URL.revokeObjectURL(u);
+}
+async function exportAllCSV(){
+  const rows = cache.length ? cache : await fetchLatest(500);
+  if (!rows.length){ alert('no data'); return; }
+  const header = ['recorded_at','device_id','temp','pressure','voc','mq2','mq137','status'];
+  const csvRows = rows.map(r => [r.recorded_at, r.device_id||'', r.temp, r.pressure, r.voc, r.mq2, r.mq137, r.status]);
+  const csv = [header.join(','), ...csvRows.map(row => row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n')].join('\n');
+  const blob = new Blob([csv], { type:'text/csv' }); const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=u; a.download='telemetry_all.csv'; a.click(); URL.revokeObjectURL(u);
+}
+
+/* UI wiring */
+tabbar.addEventListener('click', e => {
+  const t = e.target.closest('.tab');
+  if (!t) return;
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  currentSensor = t.getAttribute('data-sensor');
+  thresholdInput.value = thresholds[currentSensor] ?? '';
+  loadAndRender();
+});
+sampleCountSelect.addEventListener('change', loadAndRender);
+deviceSelect.addEventListener('change', loadAndRender);
+exportSensorBtn.addEventListener('click', exportSensorCSV);
+exportAllBtn.addEventListener('click', exportAllCSV);
+toggleThemeBtn.addEventListener('click', ()=> document.documentElement.classList.toggle('dark'));
+setThresholdBtn.addEventListener('click', ()=> { thresholds[currentSensor] = Number(thresholdInput.value); localStorage.setItem('st_thresholds', JSON.stringify(thresholds)); loadAndRender(); });
+
+/* Acknowledge helper used in HTML buttons */
+window.ack = function(key){ acknowledgeAlert(key); };
+
+/* load thresholds from localStorage */
+try{ thresholds = Object.assign(thresholds, JSON.parse(localStorage.getItem('st_thresholds')||'{}')); } catch(e){}
+
+/* Boot */
+(async function boot(){
+  try{
+    if (!window.supabase || typeof window.supabase.createClient !== 'function') throw new Error('Supabase SDK missing');
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    await loadDevices();
+    thresholdInput.value = thresholds[currentSensor];
+    await loadAndRender();
+    subscribeRealtime();
+    setTimeout(()=> { if (!cache.length && !pollTimer) pollTimer = setInterval(loadAndRender, 5000); }, 3000);
+    console.log('Dashboard with alerts ready');
+  } catch (e){ console.error('boot error', e); if (!pollTimer) pollTimer = setInterval(loadAndRender, 5000); }
 })();
 </script>
-
 </body>
 </html>
