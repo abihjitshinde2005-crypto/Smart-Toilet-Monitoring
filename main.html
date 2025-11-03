@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Smart Toilet — Light Dashboard with Alerts</title>
+  <title>Smart Toilet — Dashboard with Alerts</title>
+
+  <!-- tiny embedded favicon (prevents /favicon.ico 404) -->
+  <link rel="icon" href="data:image/x-icon;base64,AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAGAAAAAAAAAAAAAAA////AA==">
 
   <!-- Chart.js UMD -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -158,352 +161,352 @@
 
 <script>
 /* ============================
-   CONFIG – fill these values
+   Defensive init guard: prevents duplicate boot (useful on hosts/extension injection)
+   If already initialized, skip re-initialization.
    ============================ */
+if (window.DASHBOARD_INITIALIZED) {
+  console.warn('Dashboard already initialized — skipping duplicate initialization.');
+} else {
+  window.DASHBOARD_INITIALIZED = true;
 
+  /* ============================
+     CONFIG – fill these values
+     ============================ */
+  
 /* ====== CONFIG - replace these ====== */
 const SUPABASE_URL = 'https://zxrghjceuouepfrqefuv.supabase.co'; // your project URL
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4cmdoamNldW91ZXBmcnFlZnV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxMDg1MjAsImV4cCI6MjA3NzY4NDUyMH0.wKadbFlhqP_XYCePnSXpwpuH2CIXXwYt6Pd7r0uqJPg';
 /* ==================================== */
 
-const TABLE = "telemetry";
-/* ============================ */
+  const TABLE = "telemetry";
+  /* ============================ */
 
-const sampleCountSelect = document.getElementById('sampleCount');
-const deviceSelect = document.getElementById('deviceSelect');
-const tabbar = document.getElementById('tabbar');
-const currentValueEl = document.getElementById('currentValue');
-const currentTimeEl = document.getElementById('currentTime');
-const minValueEl = document.getElementById('minValue');
-const maxAvgEl = document.getElementById('maxAvg');
-const sensorChartEl = document.getElementById('sensorChart').getContext('2d');
-const donutEl = document.getElementById('statusDonut').getContext('2d');
-const mqEl = document.getElementById('mqChart').getContext('2d');
-const eventsEl = document.getElementById('events');
-const liveText = document.getElementById('liveText');
-const chartTitle = document.getElementById('chartTitle');
-const thresholdInput = document.getElementById('thresholdInput');
-const exportSensorBtn = document.getElementById('exportSensor');
-const exportAllBtn = document.getElementById('exportAll');
-const toggleThemeBtn = document.getElementById('toggleTheme');
-const setThresholdBtn = document.getElementById('setThreshold');
-const alertBanner = document.getElementById('alertBanner');
-const alertCountEl = document.getElementById('alertCount');
-const activeAlertsEl = document.getElementById('activeAlerts');
-const alertHistoryEl = document.getElementById('alertHistory');
+  /* DOM refs */
+  const sampleCountSelect = document.getElementById('sampleCount');
+  const deviceSelect = document.getElementById('deviceSelect');
+  const tabbar = document.getElementById('tabbar');
+  const currentValueEl = document.getElementById('currentValue');
+  const currentTimeEl = document.getElementById('currentTime');
+  const minValueEl = document.getElementById('minValue');
+  const maxAvgEl = document.getElementById('maxAvg');
+  const sensorChartEl = document.getElementById('sensorChart').getContext('2d');
+  const donutEl = document.getElementById('statusDonut').getContext('2d');
+  const mqEl = document.getElementById('mqChart').getContext('2d');
+  const eventsEl = document.getElementById('events');
+  const liveText = document.getElementById('liveText');
+  const chartTitle = document.getElementById('chartTitle');
+  const thresholdInput = document.getElementById('thresholdInput');
+  const exportSensorBtn = document.getElementById('exportSensor');
+  const exportAllBtn = document.getElementById('exportAll');
+  const toggleThemeBtn = document.getElementById('toggleTheme');
+  const setThresholdBtn = document.getElementById('setThreshold');
+  const alertBanner = document.getElementById('alertBanner');
+  const alertCountEl = document.getElementById('alertCount');
+  const activeAlertsEl = document.getElementById('activeAlerts');
+  const alertHistoryEl = document.getElementById('alertHistory');
 
-let supabase = null;
-let cache = []; // chronological
-let currentSensor = 'temp';
-let pollTimer = null;
-let thresholds = { temp: 50, pressure: 1200, voc: 40000, mq2: 2000, mq137: 500 };
+  /* State & globals */
+  let supabase = null;
+  let cache = []; // chronological
+  let currentSensor = 'temp';
+  let pollTimer = null;
+  let thresholds = { temp: 50, pressure: 1200, voc: 40000, mq2: 2000, mq137: 500 };
 
-/* Alerts data structures */
-const activeAlerts = {}; // key -> alert object
-const alertHistory = []; // chronological (newest last)
+  /* Alerts data structures */
+  const activeAlerts = {}; // key -> alert object
+  const alertHistory = []; // chronological (newest last)
 
-/* Charts */
-const sensorChart = new Chart(sensorChartEl, {
-  type: 'line',
-  data: { labels: [], datasets: [{ label: 'value', data: [], borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.08)', fill:true, pointRadius:0, tension:0.25 }]},
-  options: { plugins:{legend:{display:false}}, scales:{x:{display:true}} }
-});
-const donutChart = new Chart(donutEl, { type:'doughnut', data:{labels:['Clean','Moderate','Dirty'], datasets:[{data:[0,0,0],backgroundColor:['#10b981','#f59e0b','#ef4444']}]}, options:{plugins:{legend:{position:'bottom'}}} });
-const mqChart = new Chart(mqEl, { type:'bar', data:{ labels:['MQ2','MQ137'], datasets:[{data:[0,0], backgroundColor:['#10b981','#f59e0b']}]}, options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}} });
-
-/* Utilities */
-function normalizeRow(r){
-  return {
-    recorded_at: r.recorded_at,
-    device_id: r.device_id || '',
-    temp: r.temp !== null && r.temp !== undefined ? Number(r.temp) : null,
-    pressure: r.pressure !== null && r.pressure !== undefined ? Number(r.pressure) : null,
-    voc: r.voc !== null && r.voc !== undefined ? Number(r.voc) : null,
-    mq2: r.mq2 !== null && r.mq2 !== undefined ? Number(r.mq2) : null,
-    mq137: r.mq137 !== null && r.q137 !== undefined ? Number(r.mq137) : (r.mq137 !== undefined ? Number(r.mq137) : null),
-    status: r.status || 'Clean'
-  };
-}
-
-function pushSample(r){
-  cache.push(r);
-  const max = Number(sampleCountSelect.value) || 100;
-  if (cache.length > max) cache.shift();
-}
-
-/* Alerts: create key per sensor+device */
-function alertKey(sensor, device){ return `${sensor}::${device||'all'}`; }
-
-/* Create a new alert */
-function createAlert(sensor, device, value, row){
-  const key = alertKey(sensor, device);
-  if (activeAlerts[key]) return; // already active
-
-  const now = new Date().toISOString();
-  const alert = {
-    id: Math.random().toString(36).slice(2,9),
-    sensor, device, value, first_seen: now, last_seen: now,
-    acknowledged: false, resolved: false,
-    row // keep a reference to the triggering row for context
-  };
-  activeAlerts[key] = alert;
-  alertHistory.push(Object.assign({}, alert)); // push to history as well (copy)
-  renderAlerts();
-  showBanner();
-}
-
-/* Resolve alert when value falls below threshold */
-function resolveAlert(sensor, device, value){
-  const key = alertKey(sensor, device);
-  const a = activeAlerts[key];
-  if (!a) return;
-  a.resolved = true;
-  a.resolved_at = new Date().toISOString();
-  a.last_seen = new Date().toISOString();
-  // move to history (already in history), remove from active
-  delete activeAlerts[key];
-  renderAlerts();
-  if (Object.keys(activeAlerts).length === 0) hideBanner();
-}
-
-/* Acknowledge alert (user action) */
-function acknowledgeAlert(key){
-  const a = activeAlerts[key];
-  if (!a) return;
-  a.acknowledged = true;
-  // also move to history and remove from active list
-  a.acknowledged_at = new Date().toISOString();
-  alertHistory.push(Object.assign({}, a));
-  delete activeAlerts[key];
-  renderAlerts();
-  if (Object.keys(activeAlerts).length === 0) hideBanner();
-}
-
-/* Render active alerts and history */
-function renderAlerts(){
-  // active
-  activeAlertsEl.innerHTML = '';
-  const keys = Object.keys(activeAlerts);
-  alertCountEl.textContent = keys.length;
-  keys.forEach(k => {
-    const a = activeAlerts[k];
-    const div = document.createElement('div');
-    div.className = 'alert-item';
-    div.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
-        <div><strong>${a.sensor.toUpperCase()}</strong> — ${a.device||'all'}</div>
-        <div style="font-size:12px;color:${a.value > thresholds[a.sensor] ? '#7f1d1d' : '#6b7280'}">${a.value}</div>
-      </div>
-      <div class="small" style="margin-top:6px">First: ${new Date(a.first_seen).toLocaleString()}</div>
-      <div style="margin-top:8px;display:flex;gap:8px">
-        <button onclick="ack('${k}')">Acknowledge</button>
-      </div>`;
-    activeAlertsEl.appendChild(div);
+  /* Charts */
+  const sensorChart = new Chart(sensorChartEl, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: 'value', data: [], borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.08)', fill:true, pointRadius:0, tension:0.25 }]},
+    options: { plugins:{legend:{display:false}}, scales:{x:{display:true}} }
   });
+  const donutChart = new Chart(donutEl, { type:'doughnut', data:{labels:['Clean','Moderate','Dirty'], datasets:[{data:[0,0,0],backgroundColor:['#10b981','#f59e0b','#ef4444']}]}, options:{plugins:{legend:{position:'bottom'}}} });
+  const mqChart = new Chart(mqEl, { type:'bar', data:{ labels:['MQ2','MQ137'], datasets:[{data:[0,0], backgroundColor:['#10b981','#f59e0b']}]}, options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}} });
 
-  // history: show last 30
-  alertHistoryEl.innerHTML = '';
-  const hist = alertHistory.slice(-30).reverse();
-  hist.forEach(h => {
-    const div = document.createElement('div');
-    div.className = 'alert-item';
-    div.style.opacity = '0.95';
-    div.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
-        <div><strong>${h.sensor.toUpperCase()}</strong> — ${h.device||'all'}</div>
-        <div class="small">${h.acknowledged ? 'Acknowledged' : (h.resolved ? 'Resolved' : 'Active')}</div>
-      </div>
-      <div class="small" style="margin-top:6px">Value: ${h.value} • First: ${new Date(h.first_seen).toLocaleString()} ${h.resolved_at? ' • Resolved: ' + new Date(h.resolved_at).toLocaleString():''}</div>`;
-    alertHistoryEl.appendChild(div);
-  });
-}
+  /* Utilities */
+  function normalizeRow(r){
+    return {
+      recorded_at: r.recorded_at,
+      device_id: r.device_id || '',
+      temp: r.temp !== null && r.temp !== undefined ? Number(r.temp) : null,
+      pressure: r.pressure !== null && r.pressure !== undefined ? Number(r.pressure) : null,
+      voc: r.voc !== null && r.voc !== undefined ? Number(r.voc) : null,
+      mq2: r.mq2 !== null && r.mq2 !== undefined ? Number(r.mq2) : null,
+      mq137: r.mq137 !== null && r.mq137 !== undefined ? Number(r.mq137) : null,
+      status: r.status || 'Clean'
+    };
+  }
 
-/* Banner show/hide */
-function showBanner(){ alertBanner.style.display = 'block'; }
-function hideBanner(){ alertBanner.style.display = 'none'; }
+  function pushSample(r){
+    cache.push(r);
+    const max = Number(sampleCountSelect.value) || 100;
+    if (cache.length > max) cache.shift();
+  }
 
-/* Check thresholds for a row, create/resolve alerts accordingly */
-function checkAlertsForRow(row){
-  const device = row.device_id || '';
-  const sensors = ['temp','pressure','voc','mq2','mq137'];
-  sensors.forEach(sensor => {
-    const val = row[sensor];
-    const th = thresholds[sensor];
-    if (typeof val === 'number' && th !== undefined && !Number.isNaN(th)) {
-      if (val > th) {
-        // create or update last_seen
+  /* Alerts helpers */
+  function alertKey(sensor, device){ return `${sensor}::${device||'all'}`; }
+
+  function createAlert(sensor, device, value, row){
+    const key = alertKey(sensor, device);
+    if (activeAlerts[key]) {
+      // update last_seen and value
+      activeAlerts[key].last_seen = new Date().toISOString();
+      activeAlerts[key].value = value;
+      return;
+    }
+    const now = new Date().toISOString();
+    const alert = {
+      id: Math.random().toString(36).slice(2,9),
+      sensor, device, value, first_seen: now, last_seen: now,
+      acknowledged: false, resolved: false, row
+    };
+    activeAlerts[key] = alert;
+    alertHistory.push(Object.assign({}, alert));
+    renderAlerts();
+    showBanner();
+  }
+
+  function resolveAlert(sensor, device){
+    const key = alertKey(sensor, device);
+    const a = activeAlerts[key];
+    if (!a) return;
+    a.resolved = true;
+    a.resolved_at = new Date().toISOString();
+    delete activeAlerts[key];
+    renderAlerts();
+    if (Object.keys(activeAlerts).length === 0) hideBanner();
+  }
+
+  function acknowledgeAlert(key){
+    const a = activeAlerts[key];
+    if (!a) return;
+    a.acknowledged = true;
+    a.acknowledged_at = new Date().toISOString();
+    alertHistory.push(Object.assign({}, a));
+    delete activeAlerts[key];
+    renderAlerts();
+    if (Object.keys(activeAlerts).length === 0) hideBanner();
+  }
+
+  function renderAlerts(){
+    activeAlertsEl.innerHTML = '';
+    const keys = Object.keys(activeAlerts);
+    alertCountEl.textContent = keys.length;
+    keys.forEach(k => {
+      const a = activeAlerts[k];
+      const div = document.createElement('div');
+      div.className = 'alert-item';
+      div.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+          <div><strong>${a.sensor.toUpperCase()}</strong> — ${a.device||'all'}</div>
+          <div style="font-size:12px;color:${a.value > thresholds[a.sensor] ? '#7f1d1d' : '#6b7280'}">${a.value}</div>
+        </div>
+        <div class="small" style="margin-top:6px">First: ${new Date(a.first_seen).toLocaleString()}</div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button onclick="window.ack('${k}')">Acknowledge</button>
+        </div>`;
+      activeAlertsEl.appendChild(div);
+    });
+
+    // history: show last 30
+    alertHistoryEl.innerHTML = '';
+    const hist = alertHistory.slice(-30).reverse();
+    hist.forEach(h => {
+      const div = document.createElement('div');
+      div.className = 'alert-item';
+      div.style.opacity = '0.95';
+      div.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+          <div><strong>${h.sensor.toUpperCase()}</strong> — ${h.device||'all'}</div>
+          <div class="small">${h.acknowledged ? 'Acknowledged' : (h.resolved ? 'Resolved' : 'Active')}</div>
+        </div>
+        <div class="small" style="margin-top:6px">Value: ${h.value} • First: ${new Date(h.first_seen).toLocaleString()} ${h.resolved_at? ' • Resolved: ' + new Date(h.resolved_at).toLocaleString():''}</div>`;
+      alertHistoryEl.appendChild(div);
+    });
+  }
+
+  function showBanner(){ alertBanner.style.display = 'block'; }
+  function hideBanner(){ alertBanner.style.display = 'none'; }
+
+  function checkAlertsForRow(row){
+    const device = row.device_id || '';
+    const sensors = ['temp','pressure','voc','mq2','mq137'];
+    sensors.forEach(sensor => {
+      const val = row[sensor];
+      const th = thresholds[sensor];
+      if (typeof val === 'number' && th !== undefined && !Number.isNaN(th)) {
         const k = alertKey(sensor, device);
-        if (!activeAlerts[k]) createAlert(sensor, device, val, row);
-        else activeAlerts[k].last_seen = new Date().toISOString();
-      } else {
-        // value below threshold -> resolve any active alert
-        const k = alertKey(sensor, device);
-        if (activeAlerts[k]) resolveAlert(sensor, device, val);
+        if (val > th) createAlert(sensor, device, val, row);
+        else if (activeAlerts[k]) resolveAlert(sensor, device);
       }
+    });
+  }
+
+  /* UI and chart updates */
+  function addEventRow(row){
+    const d = document.createElement('div');
+    d.style.padding='8px'; d.style.borderBottom='1px solid #f1f5f9';
+    d.innerHTML = `<div style="font-weight:700">${row.status}</div><div class="small">${new Date(row.recorded_at).toLocaleString()}</div><div class="small">T:${row.temp ?? '-'} P:${row.pressure ?? '-'} VOC:${row.voc ?? '-'} MQ2:${row.mq2 ?? '-'} MQ137:${row.mq137 ?? '-'}</div>`;
+    eventsEl.prepend(d);
+    while (eventsEl.children.length > 200) eventsEl.removeChild(eventsEl.lastChild);
+  }
+
+  function computeStats(values){
+    const nums = values.filter(v => typeof v === 'number');
+    if (!nums.length) return {min:null,max:null,avg:null};
+    const min = Math.min(...nums), max = Math.max(...nums), avg = nums.reduce((a,b)=>a+b,0)/nums.length;
+    return {min,max,avg};
+  }
+
+  function updateUIandCharts(){
+    if (!cache.length){ currentValueEl.textContent='—'; currentTimeEl.textContent='—'; minValueEl.textContent='—'; maxAvgEl.textContent='—'; return; }
+    const latest = cache[cache.length-1];
+    const val = latest[currentSensor];
+    currentValueEl.textContent = (val !== null && val !== undefined) ? String(val) : '—';
+    currentTimeEl.textContent = new Date(latest.recorded_at).toLocaleString();
+
+    const arr = cache.map(r => r[currentSensor]).filter(x => typeof x === 'number');
+    if (arr.length){
+      const stats = computeStats(arr);
+      minValueEl.textContent = stats.min;
+      maxAvgEl.textContent = `${stats.max} / ${stats.avg.toFixed(2)}`;
+    } else { minValueEl.textContent='—'; maxAvgEl.textContent='—'; }
+
+    // donut
+    const counts = { Clean:0, Moderate:0, Dirty:0 };
+    cache.forEach(r => counts[r.status] = (counts[r.status]||0)+1);
+    donutChart.data.datasets[0].data = [counts.Clean, counts.Moderate, counts.Dirty];
+    donutChart.update();
+
+    // mqChart latest
+    const last = cache[cache.length-1];
+    mqChart.data.datasets[0].data = [last.mq2 || 0, last.mq137 || 0];
+    mqChart.update();
+
+    // update sensor chart
+    const labels = cache.map(r => new Date(r.recorded_at).toLocaleTimeString());
+    const data = cache.map(r => r[currentSensor]);
+    sensorChart.data.labels = labels;
+    sensorChart.data.datasets[0].data = data;
+    sensorChart.update();
+  }
+
+  /* REST load */
+  async function fetchLatest(limit=100, device=''){
+    try{
+      let q = supabase.from(TABLE).select('*').order('recorded_at',{ascending:false}).limit(limit);
+      if (device) q = q.eq('device_id', device);
+      const { data, error } = await q;
+      if (error){ console.error('REST error', error); return []; }
+      return (data||[]).slice().reverse().map(normalizeRow);
+    }catch(e){ console.error('fetchLatest exception', e); return []; }
+  }
+
+  /* load devices for selector */
+  async function loadDevices(){
+    try{
+      const { data, error } = await supabase.from(TABLE).select('device_id').neq('device_id', null).limit(1000);
+      if (error) { console.warn('device load error', error); return; }
+      const ids = Array.from(new Set((data||[]).map(x=>x.device_id).filter(Boolean)));
+      deviceSelect.innerHTML = '<option value="">All</option>' + ids.map(id => `<option value="${id}">${id}</option>`).join('');
+    }catch(e){ console.error('loadDevices', e); }
+  }
+
+  /* Full load & check alerts */
+  async function loadAndRender(){
+    const limit = Number(sampleCountSelect.value) || 100;
+    const device = deviceSelect.value || '';
+    const rows = await fetchLatest(limit, device);
+    cache = rows;
+    rows.forEach(r => checkAlertsForRow(r));
+    updateUIandCharts();
+    liveText.textContent = cache.length ? 'yes' : 'no';
+    renderAlerts();
+  }
+
+  /* Realtime subscription */
+  function subscribeRealtime(){
+    try{
+      const ch = supabase
+        .channel('public:' + TABLE)
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:TABLE }, payload => {
+          const r = normalizeRow(payload.new);
+          if (deviceSelect.value && r.device_id !== deviceSelect.value) return;
+          pushSample(r);
+          addEventRow(r);
+          checkAlertsForRow(r);
+          updateUIandCharts();
+          liveText.textContent = 'yes';
+        });
+
+      ch.subscribe(status => {
+        console.log('realtime status', status);
+        if (status === 'SUBSCRIBED') { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+        else { if (!pollTimer) pollTimer = setInterval(loadAndRender, 5000); }
+      }).onError(err => { console.error('realtime error', err); if (!pollTimer) pollTimer = setInterval(loadAndRender, 5000); });
+    }catch(e){ console.error('subscribeRealtime', e); if (!pollTimer) pollTimer = setInterval(loadAndRender, 5000); }
+  }
+
+  /* Export CSVs */
+  function exportSensorCSV(){
+    if (!cache.length){ alert('No data'); return; }
+    const header = ['recorded_at','device_id',currentSensor];
+    const rows = cache.map(r => [r.recorded_at, r.device_id || '', r[currentSensor]]);
+    const csv = [header.join(','), ...rows.map(row => row.map(c => `"${String(c).replace(/"/g,'""')}"`).join(','))].join('\n');
+    const blob = new Blob([csv], { type:'text/csv' }); const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=u; a.download=`${currentSensor}_data.csv`; a.click(); URL.revokeObjectURL(u);
+  }
+  async function exportAllCSV(){
+    const rows = cache.length ? cache : await fetchLatest(500);
+    if (!rows.length){ alert('no data'); return; }
+    const header = ['recorded_at','device_id','temp','pressure','voc','mq2','mq137','status'];
+    const csvRows = rows.map(r => [r.recorded_at, r.device_id||'', r.temp, r.pressure, r.voc, r.mq2, r.mq137, r.status]);
+    const csv = [header.join(','), ...csvRows.map(row => row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n')].join('\n');
+    const blob = new Blob([csv], { type:'text/csv' }); const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=u; a.download='telemetry_all.csv'; a.click(); URL.revokeObjectURL(u);
+  }
+
+  /* UI wiring */
+  tabbar.addEventListener('click', e => {
+    const t = e.target.closest('.tab');
+    if (!t) return;
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    currentSensor = t.getAttribute('data-sensor');
+    thresholdInput.value = thresholds[currentSensor] ?? '';
+    loadAndRender();
+  });
+  sampleCountSelect.addEventListener('change', loadAndRender);
+  deviceSelect.addEventListener('change', loadAndRender);
+  exportSensorBtn.addEventListener('click', exportSensorCSV);
+  exportAllBtn.addEventListener('click', exportAllCSV);
+  toggleThemeBtn.addEventListener('click', ()=> document.documentElement.classList.toggle('dark'));
+  setThresholdBtn.addEventListener('click', ()=> { thresholds[currentSensor] = Number(thresholdInput.value); localStorage.setItem('st_thresholds', JSON.stringify(thresholds)); loadAndRender(); });
+
+  /* Acknowledge helper used by rendered buttons */
+  window.ack = function(key){ acknowledgeAlert(key); };
+
+  /* load thresholds from localStorage */
+  try{ thresholds = Object.assign(thresholds, JSON.parse(localStorage.getItem('st_thresholds')||'{}')); } catch(e){}
+
+  /* Boot sequence (wait for DOM loaded) */
+  document.addEventListener('DOMContentLoaded', async () => {
+    try{
+      if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+        console.error('Supabase SDK not available. Make sure the UMD script loaded.');
+        return;
+      }
+      supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      await loadDevices();
+      thresholdInput.value = thresholds[currentSensor];
+      await loadAndRender();
+      subscribeRealtime();
+      setTimeout(()=> { if (!cache.length && !pollTimer) pollTimer = setInterval(loadAndRender, 5000); }, 3000);
+      console.log('Dashboard with alerts ready');
+    } catch (e) {
+      console.error('boot error', e);
+      if (!pollTimer) pollTimer = setInterval(loadAndRender, 5000);
     }
   });
-}
-
-/* UI helpers for events, KPIs and charts (similar to previous file) */
-function addEventRow(row){
-  const d = document.createElement('div');
-  d.style.padding='8px'; d.style.borderBottom='1px solid #f1f5f9';
-  d.innerHTML = `<div style="font-weight:700">${row.status}</div><div class="small">${new Date(row.recorded_at).toLocaleString()}</div><div class="small">T:${row.temp ?? '-'} P:${row.pressure ?? '-'} VOC:${row.voc ?? '-'} MQ2:${row.mq2 ?? '-'} MQ137:${row.mq137 ?? '-'}</div>`;
-  eventsEl.prepend(d);
-  while (eventsEl.children.length > 200) eventsEl.removeChild(eventsEl.lastChild);
-}
-
-function computeStats(values){
-  const nums = values.filter(v => typeof v === 'number');
-  if (!nums.length) return {min:null,max:null,avg:null};
-  const min = Math.min(...nums), max = Math.max(...nums), avg = nums.reduce((a,b)=>a+b,0)/nums.length;
-  return {min,max,avg};
-}
-
-/* Update UI and charts based on in-memory cache (chronological) */
-function updateUIandCharts(){
-  if (!cache.length){ currentValueEl.textContent='—'; currentTimeEl.textContent='—'; minValueEl.textContent='—'; maxAvgEl.textContent='—'; return; }
-  const latest = cache[cache.length-1];
-  const val = latest[currentSensor];
-  currentValueEl.textContent = (val !== null && val !== undefined) ? String(val) : '—';
-  currentTimeEl.textContent = new Date(latest.recorded_at).toLocaleString();
-
-  const arr = cache.map(r => r[currentSensor]).filter(x => typeof x === 'number');
-  if (arr.length){
-    const stats = computeStats(arr);
-    minValueEl.textContent = stats.min;
-    maxAvgEl.textContent = `${stats.max} / ${stats.avg.toFixed(2)}`;
-  } else { minValueEl.textContent='—'; maxAvgEl.textContent='—'; }
-
-  // donut
-  const counts = { Clean:0, Moderate:0, Dirty:0 };
-  cache.forEach(r => counts[r.status] = (counts[r.status]||0)+1);
-  donutChart.data.datasets[0].data = [counts.Clean, counts.Moderate, counts.Dirty];
-  donutChart.update();
-
-  // mqChart latest
-  const last = cache[cache.length-1];
-  mqChart.data.datasets[0].data = [last.mq2 || 0, last.mq137 || 0];
-  mqChart.update();
-
-  // update sensor chart
-  const labels = cache.map(r => new Date(r.recorded_at).toLocaleTimeString());
-  const data = cache.map(r => r[currentSensor]);
-  sensorChart.data.labels = labels;
-  sensorChart.data.datasets[0].data = data;
-  sensorChart.update();
-}
-
-/* REST load */
-async function fetchLatest(limit=100, device=''){
-  try{
-    let q = supabase.from(TABLE).select('*').order('recorded_at',{ascending:false}).limit(limit);
-    if (device) q = q.eq('device_id', device);
-    const { data, error } = await q;
-    if (error){ console.error('REST error', error); return []; }
-    return (data||[]).slice().reverse().map(normalizeRow);
-  }catch(e){ console.error('fetchLatest exception', e); return []; }
-}
-
-/* load devices for selector */
-async function loadDevices(){
-  try{
-    const { data, error } = await supabase.from(TABLE).select('device_id').neq('device_id', null).limit(1000);
-    if (error) { console.warn('device load error', error); return; }
-    const ids = Array.from(new Set((data||[]).map(x=>x.device_id).filter(Boolean)));
-    deviceSelect.innerHTML = '<option value="">All</option>' + ids.map(id => `<option value="${id}">${id}</option>`).join('');
-  }catch(e){ console.error('loadDevices', e); }
-}
-
-/* Full load & check alerts */
-async function loadAndRender(){
-  const limit = Number(sampleCountSelect.value) || 100;
-  const device = deviceSelect.value || '';
-  const rows = await fetchLatest(limit, device);
-  cache = rows;
-  // check alerts for each row
-  rows.forEach(r => checkAlertsForRow(r));
-  updateUIandCharts();
-  liveText.textContent = cache.length ? 'yes' : 'no';
-  // render alerts UI
-  renderAlerts();
-}
-
-/* Realtime subscription */
-function subscribeRealtime(){
-  try{
-    const ch = supabase
-      .channel('public:' + TABLE)
-      .on('postgres_changes', { event:'INSERT', schema:'public', table:TABLE }, payload => {
-        const r = normalizeRow(payload.new);
-        // device filter
-        if (deviceSelect.value && r.device_id !== deviceSelect.value) return;
-        pushSample(r);
-        addEventRow(r);
-        checkAlertsForRow(r);
-        updateUIandCharts();
-        liveText.textContent = 'yes';
-      });
-
-    ch.subscribe(status => {
-      console.log('realtime status', status);
-      if (status === 'SUBSCRIBED') { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
-      else { if (!pollTimer) pollTimer = setInterval(loadAndRender, 5000); }
-    }).onError(err => { console.error('realtime error', err); if (!pollTimer) pollTimer = setInterval(loadAndRender, 5000); });
-  }catch(e){ console.error('subscribeRealtime', e); if (!pollTimer) pollTimer = setInterval(loadAndRender, 5000); }
-}
-
-/* Export CSVs (sensor and all) */
-function exportSensorCSV(){
-  if (!cache.length){ alert('No data'); return; }
-  const header = ['recorded_at','device_id',currentSensor];
-  const rows = cache.map(r => [r.recorded_at, r.device_id || '', r[currentSensor]]);
-  const csv = [header.join(','), ...rows.map(row => row.map(c => `"${String(c).replace(/"/g,'""')}"`).join(','))].join('\n');
-  const blob = new Blob([csv], { type:'text/csv' }); const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=u; a.download=`${currentSensor}_data.csv`; a.click(); URL.revokeObjectURL(u);
-}
-async function exportAllCSV(){
-  const rows = cache.length ? cache : await fetchLatest(500);
-  if (!rows.length){ alert('no data'); return; }
-  const header = ['recorded_at','device_id','temp','pressure','voc','mq2','mq137','status'];
-  const csvRows = rows.map(r => [r.recorded_at, r.device_id||'', r.temp, r.pressure, r.voc, r.mq2, r.mq137, r.status]);
-  const csv = [header.join(','), ...csvRows.map(row => row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n')].join('\n');
-  const blob = new Blob([csv], { type:'text/csv' }); const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=u; a.download='telemetry_all.csv'; a.click(); URL.revokeObjectURL(u);
-}
-
-/* UI wiring */
-tabbar.addEventListener('click', e => {
-  const t = e.target.closest('.tab');
-  if (!t) return;
-  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-  t.classList.add('active');
-  currentSensor = t.getAttribute('data-sensor');
-  thresholdInput.value = thresholds[currentSensor] ?? '';
-  loadAndRender();
-});
-sampleCountSelect.addEventListener('change', loadAndRender);
-deviceSelect.addEventListener('change', loadAndRender);
-exportSensorBtn.addEventListener('click', exportSensorCSV);
-exportAllBtn.addEventListener('click', exportAllCSV);
-toggleThemeBtn.addEventListener('click', ()=> document.documentElement.classList.toggle('dark'));
-setThresholdBtn.addEventListener('click', ()=> { thresholds[currentSensor] = Number(thresholdInput.value); localStorage.setItem('st_thresholds', JSON.stringify(thresholds)); loadAndRender(); });
-
-/* Acknowledge helper used in HTML buttons */
-window.ack = function(key){ acknowledgeAlert(key); };
-
-/* load thresholds from localStorage */
-try{ thresholds = Object.assign(thresholds, JSON.parse(localStorage.getItem('st_thresholds')||'{}')); } catch(e){}
-
-/* Boot */
-(async function boot(){
-  try{
-    if (!window.supabase || typeof window.supabase.createClient !== 'function') throw new Error('Supabase SDK missing');
-    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    await loadDevices();
-    thresholdInput.value = thresholds[currentSensor];
-    await loadAndRender();
-    subscribeRealtime();
-    setTimeout(()=> { if (!cache.length && !pollTimer) pollTimer = setInterval(loadAndRender, 5000); }, 3000);
-    console.log('Dashboard with alerts ready');
-  } catch (e){ console.error('boot error', e); if (!pollTimer) pollTimer = setInterval(loadAndRender, 5000); }
-})();
+} // end guard
 </script>
 </body>
 </html>
