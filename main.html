@@ -1,116 +1,122 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sensor Dashboard</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f4f4f4;
-            text-align: center;
-        }
-
-        h1 {
-            margin: 20px 0;
-            color: #333;
-        }
-
-        .sensor-container {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 20px;
-            margin: 20px;
-        }
-
-        .sensor-card {
-            background: #fff;
-            border-radius: 10px;
-            padding: 20px;
-            width: 150px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-        }
-
-        .sensor-card h2 {
-            font-size: 18px;
-            margin-bottom: 10px;
-        }
-
-        .sensor-card .value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #007BFF;
-        }
-    </style>
-    <!-- Supabase client -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Realtime Sensor Dashboard</title>
+<style>
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg,#74ebd5,#ACB6E5);
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+h1 {
+    color: #fff;
+    margin: 30px 0;
+    text-shadow: 1px 1px 4px #000;
+}
+.sensor-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit,minmax(180px,1fr));
+    gap: 20px;
+    width: 90%;
+    max-width: 1000px;
+}
+.sensor-card {
+    background: #fff;
+    border-radius: 15px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+    transition: transform 0.3s, box-shadow 0.3s;
+}
+.sensor-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 20px rgba(0,0,0,0.4);
+}
+.sensor-card h2 {
+    font-size: 20px;
+    margin-bottom: 10px;
+    color: #333;
+}
+.sensor-card .value {
+    font-size: 28px;
+    font-weight: bold;
+    color: #007BFF;
+}
+.high { color: #FF3B3B; }
+.normal { color: #28A745; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 </head>
 <body>
-    <h1>Sensor Dashboard</h1>
-    <div class="sensor-container">
-        <div class="sensor-card" id="temperature">
-            <h2>Temperature</h2>
-            <p class="value">-- °C</p>
-        </div>
-        <div class="sensor-card" id="pressure">
-            <h2>Pressure</h2>
-            <p class="value">-- Pa</p>
-        </div>
-        <div class="sensor-card" id="mq2">
-            <h2>MQ2</h2>
-            <p class="value">--</p>
-        </div>
-        <div class="sensor-card" id="mq137">
-            <h2>MQ137</h2>
-            <p class="value">--</p>
-        </div>
-        <div class="sensor-card" id="voc">
-            <h2>VOC</h2>
-            <p class="value">--</p>
-        </div>
-        <div class="sensor-card" id="sgp40">
-            <h2>SGP40</h2>
-            <p class="value">--</p>
-        </div>
+
+<h1>Realtime Sensor Dashboard</h1>
+
+<div class="sensor-container">
+    <div class="sensor-card" id="pressure">
+        <h2>Pressure</h2>
+        <p class="value">-- Pa</p>
     </div>
+    <div class="sensor-card" id="mq2">
+        <h2>MQ2</h2>
+        <p class="value">--</p>
+    </div>
+    <div class="sensor-card" id="mq137">
+        <h2>MQ137</h2>
+        <p class="value">--</p>
+    </div>
+    <div class="sensor-card" id="voc">
+        <h2>VOC</h2>
+        <p class="value">--</p>
+    </div>
+    <div class="sensor-card" id="status">
+        <h2>Status</h2>
+        <p class="value">--</p>
+    </div>
+</div>
 
-    <script>
-        // ===== Supabase Configuration =====
-        const SUPABASE_URL = 'https://zxrghjceuouepfrqefuv.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4cmdoamNldW91ZXBmcnFlZnV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxMDg1MjAsImV4cCI6MjA3NzY4NDUyMH0.wKadbFlhqP_XYCePnSXpwpuH2CIXXwYt6Pd7r0uqJPg';
-        const TABLE = 'telemetry';
+<script>
+const SUPABASE_URL = 'https://zxrghjceuouepfrqefuv.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4cmdoamNldW91ZXBmcnFlZnV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxMDg1MjAsImV4cCI6MjA3NzY4NDUyMH0.wKadbFlhqP_XYCePnSXpwpuH2CIXXwYt6Pd7r0uqJPg';
+const TABLE = 'telemetry';
 
-        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // Function to fetch latest sensor data
-        async function fetchSensorData() {
-            let { data, error } = await supabase
-                .from(TABLE)
-                .select('*')
-                .order('id', { ascending: false })
-                .limit(1);
+// Function to update UI
+function updateUI(latest) {
+    document.querySelector('#pressure .value').textContent = latest.pressure ?? 'N/A';
+    document.querySelector('#mq2 .value').textContent = latest.mq2 ?? 'N/A';
+    document.querySelector('#mq137 .value').textContent = latest.mq137 ?? 'N/A';
+    document.querySelector('#voc .value').textContent = latest.voc ?? 'N/A';
+    document.querySelector('#status .value').textContent = latest.status ?? 'N/A';
+}
 
-            if (error) {
-                console.error('Error fetching data:', error);
-                return;
-            }
+// Initial fetch to show latest data
+async function fetchLatest() {
+    let { data, error } = await client
+        .from(TABLE)
+        .select('*')
+        .order('id', { ascending: false })
+        .limit(1);
 
-            if (data && data.length > 0) {
-                const latest = data[0];
-                document.querySelector('#temperature .value').textContent = latest.temperature + ' °C';
-                document.querySelector('#pressure .value').textContent = latest.pressure + ' Pa';
-                document.querySelector('#mq2 .value').textContent = latest.mq2;
-                document.querySelector('#mq137 .value').textContent = latest.mq137;
-                document.querySelector('#voc .value').textContent = latest.voc;
-                document.querySelector('#sgp40 .value').textContent = latest.sgp40;
-            }
-        }
+    if (data && data.length > 0) updateUI(data[0]);
+}
+fetchLatest();
 
-        // Fetch data every 5 seconds
-        fetchSensorData();
-        setInterval(fetchSensorData, 5000);
-    </script>
+// Subscribe to realtime inserts
+client
+  .channel(`realtime_${TABLE}`)
+  .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLE }, payload => {
+      console.log('New row:', payload.new);
+      updateUI(payload.new);
+  })
+  .subscribe();
+</script>
+
 </body>
 </html>
-
